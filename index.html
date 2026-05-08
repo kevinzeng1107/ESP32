@@ -2,94 +2,82 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ESP32 MQTT 專屬控制面板</title>
+    <title>ESP32 控制面板 (8813BF246EB4)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
     <style>
-        /* ... 保留大部分原始 CSS ... */
-        body { font-family: sans-serif; background: #0f1117; color: #e2e8f0; padding: 20px; }
-        .card { background: #1e2230; border-radius: 16px; padding: 20px; max-width: 420px; margin: 10px auto; border: 1px solid #2d3348; }
-        .input-group { display: flex; gap: 8px; margin-bottom: 15px; }
-        input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #2d3348; background: #151821; color: white; }
-        .btn-set { background: #6366f1; color: white; border: none; padding: 0 15px; border-radius: 8px; cursor: pointer; }
-        /* (其餘按鈕樣式參考原始碼)  */
+        /* 保持你的漂亮 UI 樣式 */
+        body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
+        .card { background: #1e2230; border: 1px solid #2d3348; border-radius: 16px; padding: 28px; width: 100%; max-width: 400px; margin-bottom: 16px; text-align: center; }
+        #conn-status { margin-bottom: 20px; font-size: 0.9rem; color: #94a3b8; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .btn { padding: 14px; border-radius: 10px; border: none; font-weight: 600; cursor: pointer; }
+        .btn-on { background: #fde047; color: #1a1200; }
+        .btn-off { background: #334155; color: #f8fafc; }
+        #buttonStatus { margin-top: 10px; padding: 15px; border-radius: 8px; background: #151821; font-weight: bold; }
+        .pressed { color: #4ade80; border: 1px solid #4ade80; }
+        .released { color: #818cf8; border: 1px solid #818cf8; }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <h3>設備連線設定</h3>
-    <div class="input-group">
-        <input type="text" id="macInput" placeholder="請輸入設備 MAC (如 AABBCCDDEEFF)">
-        <button class="btn-set" onclick="updateDeviceConfig()">設定設備</button>
-    </div>
-    <div id="conn-status">
-        <div id="conn-dot"></div>
-        <span id="conn-text">請先設定設備 ID</span>
-    </div>
-</div>
+<h1>ESP32 專屬控制</h1>
+<div id="conn-status">📡 狀態：<span id="conn-text">準備連線...</span></div>
 
 <div class="card">
-    <h3>LED 控制 (<span id="display-id">未設定</span>)</h3>
     <div class="btn-group">
-        <button class="btn btn-on" id="btn-on" onclick="sendLedCommand('ON')" disabled>開啟</button>
-        <button class="btn btn-off" id="btn-off" onclick="sendLedCommand('OFF')" disabled>關閉</button>
+        <button class="btn btn-on" onclick="sendCmd('ON')">打開 LED</button>
+        <button class="btn btn-off" onclick="sendCmd('OFF')">關閉 LED</button>
     </div>
 </div>
 
 <div class="card">
-    <h3>實體按鈕狀態</h3>
-    <div id="buttonStatus">等待訊號...</div>
+    <div id="buttonStatus">等待按鈕訊號...</div>
 </div>
 
 <script>
+    // 直接固定參數
     const broker = "broker.emqx.io";
     const port = 8084;
-    let deviceID = ""; 
-    let topicLedControl = "";
-    let topicButtonStatus = "";
-    let client = null;
+    const deviceID = "8813BF246EB4"; 
+    const topicLed = `myhome/esp32/${deviceID}/led`;
+    const topicBtn = `myhome/esp32/${deviceID}/button`;
 
-    function updateDeviceConfig() {
-        const input = document.getElementById('macInput').value.trim();
-        if(!input) { alert("請輸入有效的 MAC 位址"); return; }
-        
-        deviceID = input;
-        topicLedControl = `myhome/esp32/${deviceID}/led`;
-        topicButtonStatus = `myhome/esp32/${deviceID}/button`;
-        document.getElementById('display-id').textContent = deviceID;
-        
-        if(client) client.disconnect();
-        initMqtt(); // 重新連線並訂閱新主題 
-    }
+    const client = new Paho.MQTT.Client(broker, port, "web_" + Math.random().toString(16).slice(2, 10));
 
-    function initMqtt() {
-        const clientId = "web_" + Math.random().toString(16).substr(2, 8);
-        client = new Paho.MQTT.Client(broker, port, clientId); [cite: 2]
+    client.onMessageArrived = (msg) => {
+        const el = document.getElementById('buttonStatus');
+        if (msg.payloadString === 'PRESSED') {
+            el.textContent = '🟢 按鈕按下';
+            el.className = 'pressed';
+        } else {
+            el.textContent = '🔵 按鈕放開';
+            el.className = 'released';
+        }
+    };
 
-        client.onMessageArrived = function(message) {
-            if (message.destinationName === topicButtonStatus) { [cite: 2]
-                const el = document.getElementById('buttonStatus');
-                el.textContent = message.payloadString === 'PRESSED' ? '🟢 已按下' : '🔵 已放開';
-                el.className = message.payloadString.toLowerCase();
-            }
-        };
-
+    function connect() {
         client.connect({
             useSSL: true,
-            onSuccess: function() {
-                document.getElementById('conn-text').textContent = "已連線至 " + deviceID;
-                document.querySelectorAll('.btn').forEach(b => b.disabled = false);
-                client.subscribe(topicButtonStatus); [cite: 2]
+            onSuccess: () => {
+                document.getElementById('conn-text').textContent = "✅ 已連接設備 " + deviceID;
+                client.subscribe(topicBtn);
+            },
+            onFailure: () => {
+                document.getElementById('conn-text').textContent = "❌ 連線失敗，重試中...";
+                setTimeout(connect, 5000);
             }
         });
     }
 
-    function sendLedCommand(state) {
-        if (!client || !client.isConnected()) return;
-        const msg = new Paho.MQTT.Message(state);
-        msg.destinationName = topicLedControl; [cite: 2]
-        client.send(msg);
+    function sendCmd(state) {
+        if (!client.isConnected()) return;
+        const message = new Paho.MQTT.Message(state);
+        message.destinationName = topicLed;
+        client.send(message);
     }
+
+    // 網頁開啟自動執行
+    connect();
 </script>
 </body>
 </html>
